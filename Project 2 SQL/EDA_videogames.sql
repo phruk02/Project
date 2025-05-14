@@ -207,14 +207,99 @@ WHERE "Year" BETWEEN 2007 AND 2011
 ORDER BY "Global_Sales" DESC
 LIMIT 100
 )
-, TopGame07_11_GR AS( 
-SELECT  "Publisher","Platform", COUNT("Name") as name_count 
-FROM TopGame07_11
-GROUP BY "Publisher","Platform"
-ORDER BY  "Publisher" 
+
+SELECT ROUND((sum_Other / sum_total) * 100, 2) AS percentsales_Others,
+    ROUND((sum_JP / sum_total) * 100, 2) AS percentsales_JP,
+    ROUND((sum_EU / sum_total) * 100, 2) AS percentsales_EU,
+    ROUND((sum_NA / sum_total) * 100, 2) AS percentsales_NA
+FROM(
+SELECT SUM("Other_Sales") as sum_Other,SUM("JP_Sales") as sum_JP,
+SUM("EU_Sales")as sum_EU,
+SUM("NA_Sales")as sum_NA,SUM("Global_Sales") as sum_total
+FROM suisuss.videogames_sales
+where "Name" in (SELECT "Name" FROM TopGame07_11)
 )
 
 -- 3.4 Top 100 เหล่านี้ ส่วนใหญ่มาจาก Publisher เจ้าใด?
+WITH TopGame07_11 AS(
+SELECT *  FROM suisuss.videogames_sales
+WHERE "Year" BETWEEN 2007 AND 2011
+ORDER BY "Global_Sales" DESC
+LIMIT 100
+)
+SELECT "Publisher",COUNT(*) as count_game
+FROM TopGame07_11
+GROUP BY  "Publisher"
+ORDER BY count_game DESC; 
+
+---4.Trend ของ Platform เจ้าใหญ่ (PS2, Wii, Xbox 360) 
+
+--- หายอดขาย Global ต่อปี (SUM(Global_Sales)) สำหรับแต่ละ Platform และใช้ ใช้ Window Function ทำ Rolling 3-year average
+
+CREATE TEMP TABLE IF NOT EXISTS platform_year_sales AS
+SELECT "Platform" , "Year" , SUM("Global_Sales") as total_sales
+FROM suisuss.videogames_sales
+WHERE "Platform" IN ('PS2','Wii','X360') 
+GROUP BY "Platform" , "Year";
+
+SELECT "Platform" , "Year" , total_sales , ROUND(rolling_avg_sales,2)
+FROM(
+SELECT "Platform" , "Year" , total_sales ,
+AVG(total_sales) OVER(
+  PARTITION BY "Platform" 
+  ORDER BY "Year" 
+  ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+) as rolling_avg_sales
+FROM platform_year_sales
+ORDER BY "Platform" , "Year"
+);
+---2. Peak Year 
+
+--หา ปีที่มียอดขายสูงสุด (MAX(Global_Sales)) ของแต่ละ Platform
+
+--และหาปีที่ยอดขายเริ่มลดลง 20% จากปี peak
+
+WITH PlatformYearSales AS (
+SELECT "Platform" , "Year" , SUM("Global_Sales") as total_sales
+FROM suisuss.videogames_sales
+WHERE "Platform" IN ('PS2','Wii','X360') and "Year" != 0
+GROUP BY "Platform" , "Year"
+)
+
+, Rolling3YearAvg AS (
+SELECT "Platform" , "Year" , total_sales ,
+AVG(total_sales) OVER(
+  PARTITION BY "Platform" 
+  ORDER BY "Year" 
+  ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+) as rolling_avg_sales
+FROM PlatformYearSales
+)
+
+, PeakRolling AS (
+SELECT "Platform" , MAX(rolling_avg_sales) as peak_rolling
+FROM Rolling3YearAvg
+GROUP BY "Platform"
+)
+
+, RollingWithPeak AS (
+SELECT r."Platform" , r."Year" , r.rolling_avg_sales , p.peak_rolling
+FROM Rolling3YearAvg r
+JOIN PeakRolling p
+ON r."Platform" = p."Platform"
+)
+
+SELECT "Platform" , "Year" , ROUND(rolling_avg_sales, 2) as rolling_avg_sales, 
+ROUND(peak_rolling, 2) as peak_rolling ,
+ROUND((rolling_avg_sales/peak_rolling)*100 , 2) as percent_of_peak
+FROM RollingWithPeak
+WHERE (rolling_avg_sales / peak_rolling) <= 0.8
+ORDER BY "Platform" , "Year";
 
 
--- 3.5  Platform ใดใน Top 100 ที่มี "แนวเกมเฉพาะทาง" มากที่สุด?
+
+
+
+
+
+
